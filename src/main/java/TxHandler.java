@@ -1,3 +1,9 @@
+import java.security.PublicKey;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 public class TxHandler {
 
     private UTXOPool utxoPool;
@@ -21,8 +27,39 @@ public class TxHandler {
      *     values; and false otherwise.
      */
     public boolean isValidTx(Transaction tx) {
-        // IMPLEMENT THIS
-        return false;
+        ArrayList<Transaction.Output> outputs = tx.getOutputs();
+        ArrayList<Transaction.Input> inputs = tx.getInputs();
+        Set<UTXO> utxos = new HashSet<>();
+
+        for (int idx = 0; idx < inputs.size(); idx++) {
+            Transaction.Input input = inputs.get(idx);
+
+            UTXO utxo = new UTXO(input.prevTxHash, input.outputIndex);
+            if (utxos.contains(utxo)) {
+                return false;
+            } else {
+                utxos.add(utxo);
+            }
+
+            Transaction.Output prevOutput = utxoPool.getTxOutput(utxo);
+
+            PublicKey publicKey;
+            try {
+                publicKey = prevOutput.address;
+            } catch(NullPointerException e) {
+                return false;
+            }
+
+            byte[] rawDataToSign = tx.getRawDataToSign(idx);
+            if (!Crypto.verifySignature(publicKey, rawDataToSign, input.signature)) {
+                return false;
+            }
+        }
+
+        Double outputsSum = outputs.stream().map(output -> output.value).reduce(0.0, Double::sum);
+        Double inputsSum = inputs.stream().map(input -> utxoPool.getTxOutput(new UTXO(input.prevTxHash, input.outputIndex)).value).reduce(0.0, Double::sum);
+
+        return inputsSum >= outputsSum;
     }
 
     /**
@@ -32,7 +69,19 @@ public class TxHandler {
      */
     public Transaction[] handleTxs(Transaction[] possibleTxs) {
         // IMPLEMENT THIS
-        return possibleTxs;
+        List<Transaction> validTxs = new ArrayList<>();
+        for (Transaction tx : possibleTxs) {
+            if (isValidTx(tx)) {
+                validTxs.add(tx);
+                ArrayList<Transaction.Output> outputs = tx.getOutputs();
+                for (int idx = 0; idx < outputs.size(); idx++) {
+                    UTXO utxo = new UTXO(tx.getHash(), idx);
+                    utxoPool.addUTXO(utxo, outputs.get(idx));
+                }
+            }
+        }
+
+        return validTxs.toArray(new Transaction[0]);
     }
 
 }
